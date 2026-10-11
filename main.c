@@ -6,6 +6,9 @@
 #include <pico/stdlib.h>
 #include <string.h>
 
+#include "dhcpserver/dhcpserver.h"
+#include "usb_network.h"
+
 #define TCP_PORT 8232
 #define UART_ID uart0
 #define BAUD_RATE 115200
@@ -44,15 +47,19 @@ static err_t tcp_accept_callback(void *arg, struct tcp_pcb *newpcb, err_t err) {
 }
 
 int main() {
+    // Включаем аппаратный UART для связи с Heltec
     uart_init(UART_ID, BAUD_RATE);
     gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
     gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
 
+    // Инициализируем USB-сеть
     if (!usb_network_init(&ownip, &netmask, &gateway, true)) return -1;
 
-    dhcp_server_t dhcp_server;
+    // Поднимаем DHCP сервер (исправлено объявление struct)
+    struct dhcp_server dhcp_server;
     dhcp_server_init(&dhcp_server, (ip_addr_t *)&ownip, (ip_addr_t *)&netmask, false);
 
+    // Запускаем TCP сервер для трансляции RNodeInterface
     struct tcp_pcb *server_pcb = tcp_new();
     if (server_pcb) {
         if (tcp_bind(server_pcb, IP_ADDR_ANY, TCP_PORT) == ERR_OK) {
@@ -61,13 +68,16 @@ int main() {
         }
     }
 
+    // Буфер для вычитывания UART
+    uint8_t uart_buf[256];
+
     while (true) {
         usb_network_update();
 
         // Пересылка данных из UART Heltec -> в Сеть (TCP на ПК)
         if (active_client && uart_is_readable(UART_ID)) {
-            uint8_t uart_buf[256];
             int len = 0;
+            // Собираем байты из UART, пока они есть и пока не переполнился буфер
             while (uart_is_readable(UART_ID) && len < sizeof(uart_buf)) {
                 uart_buf[len++] = uart_getc(UART_ID);
                 sleep_us(10);
