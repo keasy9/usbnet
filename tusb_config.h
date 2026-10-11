@@ -77,7 +77,7 @@ extern "C" {
 #endif
 
 // set ECM (RNDIS) or NCM
-#define USE_ECM 0
+#define USE_ECM 1
 
 //--------------------------------------------------------------------
 // NCM CLASS CONFIGURATION, SEE "ncm.h" FOR PERFORMANCE TUNING
