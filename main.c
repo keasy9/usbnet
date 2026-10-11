@@ -6,7 +6,6 @@
 #include <pico/stdlib.h>
 #include <string.h>
 
-#include "dhcpserver/dhcpserver.h"
 #include "usb_network.h"
 
 #define TCP_PORT 8232
@@ -21,7 +20,7 @@ static const ip4_addr_t gateway = IPADDR4_INIT_BYTES(0, 0, 0, 0);
 
 static struct tcp_pcb *active_client = NULL;
 
-// Пересылка данных из Сети (TCP) -> в UART Heltec
+// Пересылка данных из Сети (TCP сокет) -> в UART Heltec V3
 static err_t tcp_recv_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err) {
     if (p != NULL) {
         tcp_recved(tpcb, p->tot_len);
@@ -47,19 +46,16 @@ static err_t tcp_accept_callback(void *arg, struct tcp_pcb *newpcb, err_t err) {
 }
 
 int main() {
-    // Включаем аппаратный UART для связи с Heltec
+    // Включаем аппаратный UART для связи с Heltec на скорости 115200
     uart_init(UART_ID, BAUD_RATE);
     gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
     gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
 
-    // Инициализируем USB-сеть
+    // Инициализируем USB-сеть. Последний аргумент 'true' заставляет usb_network 
+    // самостоятельно поднять внутренний DHCP-сервер без объявления его в main.c
     if (!usb_network_init(&ownip, &netmask, &gateway, true)) return -1;
 
-    // Поднимаем DHCP сервер (исправлено объявление struct)
-    struct dhcp_server dhcp_server;
-    dhcp_server_init(&dhcp_server, (ip_addr_t *)&ownip, (ip_addr_t *)&netmask, false);
-
-    // Запускаем TCP сервер для трансляции RNodeInterface
+    // Запускаем TCP сервер на порту 8232 для трансляции RNodeInterface
     struct tcp_pcb *server_pcb = tcp_new();
     if (server_pcb) {
         if (tcp_bind(server_pcb, IP_ADDR_ANY, TCP_PORT) == ERR_OK) {
@@ -68,16 +64,16 @@ int main() {
         }
     }
 
-    // Буфер для вычитывания UART
+    // Буфер для вычитывания данных из UART Heltec V3
     uint8_t uart_buf[256];
 
     while (true) {
         usb_network_update();
 
-        // Пересылка данных из UART Heltec -> в Сеть (TCP на ПК)
+        // Пересылка данных из UART Heltec -> в Сеть (TCP сокет на ПК)
         if (active_client && uart_is_readable(UART_ID)) {
             int len = 0;
-            // Собираем байты из UART, пока они есть и пока не переполнился буфер
+            // Безопасно собираем байты из UART в массив-буфер
             while (uart_is_readable(UART_ID) && len < sizeof(uart_buf)) {
                 uart_buf[len++] = uart_getc(UART_ID);
                 sleep_us(10);
